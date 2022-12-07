@@ -2,27 +2,27 @@ c#######################################################################
 c
 c ****** PSI_MULTIGPU_TEST_CODE
 c
-c     This code mimics the basic MPI+OpenACC tasks of PSI's 
+c     This code mimics the basic MPI+OpenACC tasks of PSI's
 c     MAS Solar MHD code.
 c
 c     It sets up a Cartesian MPI topology, sets up a 3D grid
 c     and tests a "seam" (point to point) MPI communication
-c     using asyncronous Send and Recv calls, which use 
+c     using asyncronous Send and Recv calls, which use
 c     OpenACC's 'host_data' to use CUDA-aware MPI.
-c     This is used both on a allocatable sub-array, as well as 
+c     This is used both on a allocatable sub-array, as well as
 c     on a local buffer static array.
 c
 c     The code will automatically configure the topology based on
-c     the number of MPI ranks it is called with.      
+c     the number of MPI ranks it is called with.
 c
-c     The code uses an MPI shared communicator to set the GPU device 
+c     The code uses an MPI shared communicator to set the GPU device
 c     number using the 'set device' ACC pragma.
 c
-c     This code assumes you launch it with the number of MPI ranks per 
-c     node = number of GPUs per node 
+c     This code assumes you launch it with the number of MPI ranks per
+c     node = number of GPUs per node
 c     (e.g. for a dual socket node with 4 GPUs: mpiexec -npersocket 2)
 c
-c     If this code works on a multi-node GPU system, 
+c     If this code works on a multi-node GPU system,
 c     than (most likely) so will MAS!
 c
 c     Author:  Ronald M. Caplan
@@ -212,6 +212,10 @@ c
 c
       ntype_real=MPI_REAL8
 c
+c ****** Set GPU device number for current rank.
+c
+!$acc set device_num(iprocsh)
+c
       end subroutine
 c#######################################################################
       subroutine check_proc_topology
@@ -255,10 +259,6 @@ c
           write (*,*) 'Number of processors available = ',nproc
         end if
       end if
-c
-c ****** Set GPU device number for current rank.
-c
-!$acc set device_num(iprocsh)
 c
       end subroutine
 c#######################################################################
@@ -593,7 +593,7 @@ c
       call MPI_Cart_sub (comm_all,keep_dim,comm_r,ierr)
 c
       return
-      end      
+      end
 c#######################################################################
       subroutine seam_vvec (v)
 c
@@ -868,9 +868,10 @@ c
 c
 c-----------------------------------------------------------------------
 c
-      integer :: nr,nt,np
-      integer :: i,j,k,ierr
-      integer, parameter :: n_per_dim=6
+      integer :: nr,nt,np,nr_2,nt_2,np_2
+      integer :: i,j,k,ic,ierr
+      integer, parameter :: n_per_dim=100
+      integer, parameter :: n_cycles=10
       type(vvec), target :: v
 c
       call init_mpi
@@ -887,14 +888,14 @@ c
 c
       if (iamp0) then
         print*, 'Grid size per dimension per rank: ',n_per_dim
-        print*, 'Grid size per rank: ',n_per_dim**3      
+        print*, 'Grid size per rank: ',n_per_dim**3
         print*,' '
       endif
 c
 c ****** Check/set the processor topology.
 c
       call check_proc_topology
-c      
+c
       call decompose_domain
 c
       if (iamp0) then
@@ -904,12 +905,16 @@ c
         print*, 'Total number of ranks: ',nproc
         print*,' '
       endif
-c      
+c
       write(*,'(5(a,i3),a)'),'World rank ',iprocw,
      &' has cart rank ',iproc,
      &' and shared rank ',iprocsh,' (i.e. GPU device number ',
      & iprocsh+1,' out of ',nprocsh,')'
-c      
+c
+      nr_2=MAX(nr/2,1)
+      nt_2=MAX(nt/2,1)
+      np_2=MAX(np/2,1)
+c
       allocate(v%r(nr-1,nt,np))
       allocate(v%t(nr,nt-1,np))
       allocate(v%p(nr,nt,np-1))
@@ -942,14 +947,43 @@ c
       enddo
 !$acc end parallel
 c
-      call seam_vvec (v)
+c     Loop multiple times.
+c
+      if (iamp0) print*,"Starting seam cycles..."
+c
+      do ic=1,n_cycles
+        call seam_vvec (v)
+        if (iamp0) print*,"cycle ",ic," completed"
+      enddo
 c
       if (iamp0) then
-!$acc update self(v%r)
-        print*, "vr(:,:,1):", v%r(:,:,1)
-        print*, "vr(:,:,2):", v%r(:,:,2)
-        print*, "vr(:,:,np-1):", v%r(:,:,np-1)
-        print*, "vr(:,:,np):", v%r(:,:,np)
+        print*,"Run completed!"
+!$acc update self(v%r,v%t,v%p)
+        print*, "vr(:,:,1):",    v%r(nr_2,nt_2,1)
+        print*, "vr(:,:,2):",    v%r(nr_2,nt_2,2)
+        print*, "vr(:,:,np-1):", v%r(nr_2,nt_2,np-1)
+        print*, "vr(:,:,np):",   v%r(nr_2,nt_2,np)
+        print*, "vt(:,:,1):",    v%t(nr_2,nt_2,1)
+        print*, "vt(:,:,2):",    v%t(nr_2,nt_2,2)
+        print*, "vt(:,:,np-1):", v%t(nr_2,nt_2,np-1)
+        print*, "vt(:,:,np):",   v%t(nr_2,nt_2,np)
+        print*, "vp(:,:,1):",    v%p(nr_2,nt_2,1)
+        print*, "vp(:,:,2):",    v%p(nr_2,nt_2,2)
+        print*, "vp(:,:,np-2):", v%p(nr_2,nt_2,np-2)
+        print*, "vp(:,:,np-1):", v%p(nr_2,nt_2,np-1)
+c
+        print*, "vr(:,1,:):",    v%r(nr_2,1,np_2)
+        print*, "vr(:,2,:):",    v%r(nr_2,2,np_2)
+        print*, "vr(:,nt-1,:):", v%r(nr_2,nt-1,np_2)
+        print*, "vr(:,nt,:):",   v%r(nr_2,nt,np_2)
+        print*, "vt(:,1,:):",    v%t(nr_2,1,np_2)
+        print*, "vt(:,2,:):",    v%t(nr_2,2,np_2)
+        print*, "vt(:,nt-2,:):", v%t(nr_2,nt-2,np_2)
+        print*, "vt(:,nt-1,:):", v%t(nr_2,nt-1,np_2)
+        print*, "vp(:,1,:):",    v%p(nr_2,1,np_2)
+        print*, "vp(:,2,:):",    v%p(nr_2,2,np_2)
+        print*, "vp(:,nt-1,:):", v%p(nr_2,nt-1,np_2)
+        print*, "vp(:,nt,:):",   v%p(nr_2,nt,np_2)
       end if
 c
 !$acc exit data delete(v%r,v%t,v%p,v)
@@ -958,4 +992,3 @@ c
       call MPI_Finalize (ierr)
 c
       end program
-
