@@ -50,31 +50,32 @@ c#######################################################################
 c
       module number_types
 c
-        use iso_fortran_env
+      use iso_fortran_env
 c
-        implicit none
+      implicit none
 c
-        integer, parameter :: r_typ=REAL64
+      integer, parameter :: r_typ=REAL64
 c
       end module
 c#######################################################################
       module types
-
-       use number_types
-
-       type :: vvec
-         real(r_typ), dimension(:,:,:), allocatable :: r !(nrm,nt,np)
-         real(r_typ), dimension(:,:,:), allocatable :: t !(nr,ntm,np)
-         real(r_typ), dimension(:,:,:), allocatable :: p !(nr,nt,npm)
-       end type
-
+c
+      use number_types
+c
+      type :: vvec
+        real(r_typ), dimension(:,:,:), allocatable :: r !(nrm,nt,np)
+        real(r_typ), dimension(:,:,:), allocatable :: t !(nr,ntm,np)
+        real(r_typ), dimension(:,:,:), allocatable :: p !(nr,nt,npm)
+      end type
+c
       end module
 c#######################################################################
       module mpidefs
 c
-        implicit none
+      use mpi
+c        
+      implicit none
 c
-        include "mpif.h"
 c ****** Total number of processors.
       integer :: nproc
 c ****** Total number of processors per node.
@@ -605,7 +606,7 @@ c
 c-----------------------------------------------------------------------
 c
       use number_types
-      use types
+      use types, ONLY : vvec
       use mpidefs
 c
 c-----------------------------------------------------------------------
@@ -618,20 +619,12 @@ c
 c
 c-----------------------------------------------------------------------
 c
-      real(r_typ),dimension(size(v%r,2),size(v%r,3)) :: sbuf11r,rbuf11r
-      real(r_typ),dimension(size(v%r,2),size(v%r,3)) :: sbuf12r,rbuf12r
-      real(r_typ),dimension(size(v%r,1),size(v%r,3)) :: sbuf21r,rbuf21r
-      real(r_typ),dimension(size(v%r,1),size(v%r,3)) :: sbuf22r,rbuf22r
-
-      real(r_typ),dimension(size(v%t,2),size(v%t,3)) :: sbuf11t,rbuf11t
-      real(r_typ),dimension(size(v%t,2),size(v%t,3)) :: sbuf12t,rbuf12t
-      real(r_typ),dimension(size(v%t,1),size(v%t,3)) :: sbuf21t,rbuf21t
-      real(r_typ),dimension(size(v%t,1),size(v%t,3)) :: sbuf22t,rbuf22t
-
-      real(r_typ),dimension(size(v%p,2),size(v%p,3)) :: sbuf11p,rbuf11p
-      real(r_typ),dimension(size(v%p,2),size(v%p,3)) :: sbuf12p,rbuf12p
-      real(r_typ),dimension(size(v%p,1),size(v%p,3)) :: sbuf21p,rbuf21p
-      real(r_typ),dimension(size(v%p,1),size(v%p,3)) :: sbuf22p,rbuf22p
+      real(r_typ),dimension(:,:),allocatable :: sbuf1r,rbuf1r
+      real(r_typ),dimension(:,:),allocatable :: sbuf2r,rbuf2r
+      real(r_typ),dimension(:,:),allocatable :: sbuf1t,rbuf1t
+      real(r_typ),dimension(:,:),allocatable :: sbuf2t,rbuf2t
+      real(r_typ),dimension(:,:),allocatable :: sbuf1p,rbuf1p
+      real(r_typ),dimension(:,:),allocatable :: sbuf2p,rbuf2p
 c
 c-----------------------------------------------------------------------
 c
@@ -652,10 +645,12 @@ c
       integer :: lbuf2r,lbuf2t,lbuf2p
       integer :: n1r,n2r,n3r,n1t,n2t,n3t,n1p,n2p,n3p
       integer :: req(12)
+      integer :: i,j,k
 c
 c-----------------------------------------------------------------------
 c
 c-----------------------------------------------------------------------
+c
 c ****** Get the dimensions of the arrays and buffer sizes:
 c
       n1r=size(v%r,1);   n2r=size(v%r,2);   n3r=size(v%r,3)
@@ -711,48 +706,71 @@ c
 c
 c ****** Load buffers.
 c
-!$acc enter data create(sbuf11r,sbuf12r,sbuf11t,sbuf12t,sbuf11p,sbuf12p,
-!$acc&                  rbuf11r,rbuf12r,rbuf11t,rbuf12t,rbuf11p,rbuf12p)
+        allocate (sbuf1r(n2r,n3r),rbuf1r(n2r,n3r),
+     &            sbuf2r(n2r,n3r),rbuf2r(n2r,n3r),
+     &            sbuf1t(n2t,n3t),rbuf1t(n2t,n3t),
+     &            sbuf2t(n2t,n3t),rbuf2t(n2t,n3t),
+     &            sbuf1p(n2p,n3p),rbuf1p(n2p,n3p),
+     &            sbuf2p(n2p,n3p),rbuf2p(n2p,n3p))
+!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+!$acc&                  rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 c
-!$acc kernels default(present)
-        sbuf11r(:,:)=v%r(n1r-1,:,:)
-        sbuf12r(:,:)=v%r(    2,:,:)
-        sbuf11t(:,:)=v%t(n1t-1,:,:)
-        sbuf12t(:,:)=v%t(    2,:,:)
-        sbuf11p(:,:)=v%p(n1p-1,:,:)
-        sbuf12p(:,:)=v%p(    2,:,:)
-!$acc end kernels
+!$acc parallel default(present)
+!$acc loop collapse(2)
+        do k=1,n3r
+          do j=1,n2r
+            sbuf1r(j,k)=v%r(n1r-1,j,k)
+            sbuf2r(j,k)=v%r(    2,j,k)
+          enddo
+        enddo
 c
-!$acc host_data use_device(sbuf11r,sbuf12r,sbuf11t,
-!$acc&                     sbuf12t,sbuf11p,sbuf12p,
-!$acc&                     rbuf11r,rbuf12r,rbuf11t,
-!$acc&                     rbuf12t,rbuf11p,rbuf12p)
-        call MPI_Irecv (rbuf11r,lbuf1r,ntype_real,iproc_rm,tagr,
+!$acc loop collapse(2)
+        do k=1,n3t
+          do j=1,n2t
+            sbuf1t(j,k)=v%t(n1t-1,j,k)
+            sbuf2t(j,k)=v%t(    2,j,k)
+          enddo
+        enddo
+c
+!$acc loop collapse(2)
+        do k=1,n3p
+          do j=1,n2p
+            sbuf1p(j,k)=v%p(n1p-1,j,k)
+            sbuf2p(j,k)=v%p(    2,j,k)
+          enddo
+        enddo
+!$acc end parallel
+c
+!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t,
+!$acc&                     sbuf2t,sbuf1p,sbuf2p,
+!$acc&                     rbuf1r,rbuf2r,rbuf1t,
+!$acc&                     rbuf2t,rbuf1p,rbuf2p)
+        call MPI_Irecv (rbuf1r,lbuf1r,ntype_real,iproc_rm,tagr,
      &                  comm_all,req(1),ierr)
-        call MPI_Irecv (rbuf12r,lbuf1r,ntype_real,iproc_rp,tagr,
+        call MPI_Irecv (rbuf2r,lbuf1r,ntype_real,iproc_rp,tagr,
      &                  comm_all,req(2),ierr)
-        call MPI_Irecv (rbuf11t,lbuf1t,ntype_real,iproc_rm,tagt,
+        call MPI_Irecv (rbuf1t,lbuf1t,ntype_real,iproc_rm,tagt,
      &                  comm_all,req(3),ierr)
-        call MPI_Irecv (rbuf12t,lbuf1t,ntype_real,iproc_rp,tagt,
+        call MPI_Irecv (rbuf2t,lbuf1t,ntype_real,iproc_rp,tagt,
      &                  comm_all,req(4),ierr)
-        call MPI_Irecv (rbuf11p,lbuf1p,ntype_real,iproc_rm,tagp,
+        call MPI_Irecv (rbuf1p,lbuf1p,ntype_real,iproc_rm,tagp,
      &                  comm_all,req(5),ierr)
-        call MPI_Irecv (rbuf12p,lbuf1p,ntype_real,iproc_rp,tagp,
+        call MPI_Irecv (rbuf2p,lbuf1p,ntype_real,iproc_rp,tagp,
      &                  comm_all,req(6),ierr)
 c
 c ****** Launch async sends.
 c
-        call MPI_Isend (sbuf11r,lbuf1r,ntype_real,iproc_rp,tagr,
+        call MPI_Isend (sbuf1r,lbuf1r,ntype_real,iproc_rp,tagr,
      &                  comm_all,req(7),ierr)
-        call MPI_Isend (sbuf12r,lbuf1r,ntype_real,iproc_rm,tagr,
+        call MPI_Isend (sbuf2r,lbuf1r,ntype_real,iproc_rm,tagr,
      &                  comm_all,req(8),ierr)
-        call MPI_Isend (sbuf11t,lbuf1t,ntype_real,iproc_rp,tagt,
+        call MPI_Isend (sbuf1t,lbuf1t,ntype_real,iproc_rp,tagt,
      &                  comm_all,req(9),ierr)
-        call MPI_Isend (sbuf12t,lbuf1t,ntype_real,iproc_rm,tagt,
+        call MPI_Isend (sbuf2t,lbuf1t,ntype_real,iproc_rm,tagt,
      &                  comm_all,req(10),ierr)
-        call MPI_Isend (sbuf11p,lbuf1p,ntype_real,iproc_rp,tagp,
+        call MPI_Isend (sbuf1p,lbuf1p,ntype_real,iproc_rp,tagp,
      &                  comm_all,req(11),ierr)
-        call MPI_Isend (sbuf12p,lbuf1p,ntype_real,iproc_rm,tagp,
+        call MPI_Isend (sbuf2p,lbuf1p,ntype_real,iproc_rm,tagp,
      &                  comm_all,req(12),ierr)
 c
 c ****** Wait for all seams to complete.
@@ -762,21 +780,54 @@ c
 c
 c ****** Unload buffers.
 c
-!$acc kernels default(present)
+!$acc parallel default(present)
         if (iproc_rm.ne.MPI_PROC_NULL) then
-           v%r(1,:,:)=rbuf11r(:,:)
-           v%t(1,:,:)=rbuf11t(:,:)
-           v%p(1,:,:)=rbuf11p(:,:)
+!$acc loop collapse(2)
+          do k=1,n3r
+            do j=1,n2r
+              v%r(1,j,k)=rbuf1r(j,k)
+            enddo
+          enddo
+!$acc loop collapse(2)
+          do k=1,n3t
+            do j=1,n2t
+              v%t(1,j,k)=rbuf1t(j,k)
+            enddo
+          enddo
+!$acc loop collapse(2)
+          do k=1,n3p
+            do j=1,n2p
+              v%p(1,j,k)=rbuf1p(j,k)
+            enddo
+          enddo
         end if
-        if (iproc_rp.ne.MPI_PROC_NULL) then
-           v%r(n1r,:,:)=rbuf12r(:,:)
-           v%t(n1t,:,:)=rbuf12t(:,:)
-           v%p(n1p,:,:)=rbuf12p(:,:)
-        end if
-!$acc end kernels
 c
-!$acc exit data delete(sbuf11r,sbuf12r,sbuf11t,sbuf12t,sbuf11p,sbuf12p,
-!$acc&                 rbuf11r,rbuf12r,rbuf11t,rbuf12t,rbuf11p,rbuf12p)
+        if (iproc_rp.ne.MPI_PROC_NULL) then
+!$acc loop collapse(2)
+          do k=1,n3r
+            do j=1,n2r
+              v%r(n1r,j,k)=rbuf2r(j,k)
+            enddo
+          enddo
+!$acc loop collapse(2)
+          do k=1,n3t
+            do j=1,n2t
+              v%t(n1t,j,k)=rbuf2t(j,k)
+            enddo
+          enddo
+!$acc loop collapse(2)
+          do k=1,n3p
+            do j=1,n2p
+              v%p(n1p,j,k)=rbuf2p(j,k)
+            enddo
+          enddo
+        end if
+!$acc end parallel
+c
+!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+!$acc&                 rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
+        deallocate (sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+     &              rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 c
       end if
 c
@@ -784,48 +835,71 @@ c ****** Seam the second dimension.
 c
       if (nproc_t.gt.1) then
 c
-!$acc enter data create(sbuf21r,sbuf22r,sbuf21t,sbuf22t,sbuf21p,sbuf22p,
-!$acc&                  rbuf21r,rbuf22r,rbuf21t,rbuf22t,rbuf21p,rbuf22p)
+        allocate (sbuf1r(n1r,n3r),rbuf1r(n1r,n3r),
+     &            sbuf2r(n1r,n3r),rbuf2r(n1r,n3r),
+     &            sbuf1t(n1t,n3t),rbuf1t(n1t,n3t),
+     &            sbuf2t(n1t,n3t),rbuf2t(n1t,n3t),
+     &            sbuf1p(n1p,n3p),rbuf1p(n1p,n3p),
+     &            sbuf2p(n1p,n3p),rbuf2p(n1p,n3p))
+!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+!$acc&                  rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 c
-!$acc kernels default(present)
-        sbuf21r(:,:)=v%r(:,n2r-1,:)
-        sbuf22r(:,:)=v%r(:,    2,:)
-        sbuf21t(:,:)=v%t(:,n2t-1,:)
-        sbuf22t(:,:)=v%t(:,    2,:)
-        sbuf21p(:,:)=v%p(:,n2p-1,:)
-        sbuf22p(:,:)=v%p(:,    2,:)
-!$acc end kernels
+!$acc parallel default(present)
+!$acc loop collapse(2)
+        do k=1,n3r
+          do j=1,n1r
+            sbuf1r(j,k)=v%r(j,n2r-1,k)
+            sbuf2r(j,k)=v%r(j,    2,k)
+          enddo
+        enddo
 c
-!$acc host_data use_device(sbuf21r,sbuf22r,sbuf21t,
-!$acc&                     sbuf22t,sbuf21p,sbuf22p,
-!$acc&                     rbuf21r,rbuf22r,rbuf21t,
-!$acc&                     rbuf22t,rbuf21p,rbuf22p)
-        call MPI_Irecv (rbuf21r,lbuf2r,ntype_real,iproc_tm,tagr,
+!$acc loop collapse(2)
+        do k=1,n3t
+          do j=1,n1t
+            sbuf1t(j,k)=v%t(j,n2t-1,k)
+            sbuf2t(j,k)=v%t(j,    2,k)
+          enddo
+        enddo
+c
+!$acc loop collapse(2)
+        do k=1,n3p
+          do j=1,n1p
+            sbuf1p(j,k)=v%p(j,n2p-1,k)
+            sbuf2p(j,k)=v%p(j,    2,k)
+          enddo
+        enddo
+!$acc end parallel
+c
+!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t,
+!$acc&                     sbuf2t,sbuf1p,sbuf2p,
+!$acc&                     rbuf1r,rbuf2r,rbuf1t,
+!$acc&                     rbuf2t,rbuf1p,rbuf2p)
+        call MPI_Irecv (rbuf1r,lbuf2r,ntype_real,iproc_tm,tagr,
      &                  comm_all,req(1),ierr)
-        call MPI_Irecv (rbuf22r,lbuf2r,ntype_real,iproc_tp,tagr,
+        call MPI_Irecv (rbuf2r,lbuf2r,ntype_real,iproc_tp,tagr,
      &                  comm_all,req(2),ierr)
-        call MPI_Irecv (rbuf21t,lbuf2t,ntype_real,iproc_tm,tagt,
+        call MPI_Irecv (rbuf1t,lbuf2t,ntype_real,iproc_tm,tagt,
      &                  comm_all,req(3),ierr)
-        call MPI_Irecv (rbuf22t,lbuf2t,ntype_real,iproc_tp,tagt,
+        call MPI_Irecv (rbuf2t,lbuf2t,ntype_real,iproc_tp,tagt,
      &                  comm_all,req(4),ierr)
-        call MPI_Irecv (rbuf21p,lbuf2p,ntype_real,iproc_tm,tagp,
+        call MPI_Irecv (rbuf1p,lbuf2p,ntype_real,iproc_tm,tagp,
      &                  comm_all,req(5),ierr)
-        call MPI_Irecv (rbuf22p,lbuf2p,ntype_real,iproc_tp,tagp,
+        call MPI_Irecv (rbuf2p,lbuf2p,ntype_real,iproc_tp,tagp,
      &                  comm_all,req(6),ierr)
 c
 c ****** Launch async sends.
 c
-        call MPI_Isend (sbuf21r,lbuf2r,ntype_real,iproc_tp,tagr,
+        call MPI_Isend (sbuf1r,lbuf2r,ntype_real,iproc_tp,tagr,
      &                  comm_all,req(7),ierr)
-        call MPI_Isend (sbuf22r,lbuf2r,ntype_real,iproc_tm,tagr,
+        call MPI_Isend (sbuf2r,lbuf2r,ntype_real,iproc_tm,tagr,
      &                  comm_all,req(8),ierr)
-        call MPI_Isend (sbuf21t,lbuf2t,ntype_real,iproc_tp,tagt,
+        call MPI_Isend (sbuf1t,lbuf2t,ntype_real,iproc_tp,tagt,
      &                  comm_all,req(9),ierr)
-        call MPI_Isend (sbuf22t,lbuf2t,ntype_real,iproc_tm,tagt,
+        call MPI_Isend (sbuf2t,lbuf2t,ntype_real,iproc_tm,tagt,
      &                  comm_all,req(10),ierr)
-        call MPI_Isend (sbuf21p,lbuf2p,ntype_real,iproc_tp,tagp,
+        call MPI_Isend (sbuf1p,lbuf2p,ntype_real,iproc_tp,tagp,
      &                  comm_all,req(11),ierr)
-        call MPI_Isend (sbuf22p,lbuf2p,ntype_real,iproc_tm,tagp,
+        call MPI_Isend (sbuf2p,lbuf2p,ntype_real,iproc_tm,tagp,
      &                  comm_all,req(12),ierr)
 c
 c ****** Wait for all seams to complete.
@@ -835,21 +909,54 @@ c
 c
 c ****** Unload buffers.
 c
-!$acc kernels default(present)
+!$acc parallel default(present)
         if (iproc_tm.ne.MPI_PROC_NULL) then
-           v%r(:,1,:)=rbuf21r(:,:)
-           v%t(:,1,:)=rbuf21t(:,:)
-           v%p(:,1,:)=rbuf21p(:,:)
+!$acc loop collapse(2)
+          do k=1,n3r
+            do j=1,n1r
+              v%r(j,1,k)=rbuf1r(j,k)
+            enddo
+          enddo
+!$acc loop collapse(2)
+          do k=1,n3t
+            do j=1,n1t
+              v%t(j,1,k)=rbuf1t(j,k)
+            enddo
+          enddo
+!$acc loop collapse(2)
+          do k=1,n3p
+            do j=1,n1p
+              v%p(j,1,k)=rbuf1p(j,k)
+            enddo
+          enddo
         end if
-        if (iproc_tp.ne.MPI_PROC_NULL) then
-           v%r(:,n2r,:)=rbuf22r(:,:)
-           v%t(:,n2t,:)=rbuf22t(:,:)
-           v%p(:,n2p,:)=rbuf22p(:,:)
-        end if
-!$acc end kernels
 c
-!$acc exit data delete(sbuf21r,sbuf22r,sbuf21t,sbuf22t,sbuf21p,sbuf22p,
-!$acc&                 rbuf21r,rbuf22r,rbuf21t,rbuf22t,rbuf21p,rbuf22p)
+        if (iproc_tp.ne.MPI_PROC_NULL) then
+!$acc loop collapse(2)
+          do k=1,n3r
+            do j=1,n1r
+              v%r(j,n2r,k)=rbuf2r(j,k)
+            enddo
+          enddo
+!$acc loop collapse(2)
+          do k=1,n3t
+            do j=1,n1t
+              v%t(j,n2t,k)=rbuf2t(j,k)
+            enddo
+          enddo
+!$acc loop collapse(2)
+          do k=1,n3p
+            do j=1,n1p
+              v%p(j,n2p,k)=rbuf2p(j,k)
+            enddo
+          enddo
+        end if
+!$acc end parallel
+c
+!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+!$acc&                 rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
+        deallocate (sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+     &              rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 c
       end if
 c
@@ -870,8 +977,8 @@ c-----------------------------------------------------------------------
 c
       integer :: nr,nt,np,nr_2,nt_2,np_2
       integer :: i,j,k,ic,ierr
-      integer, parameter :: n_per_dim=100
-      integer, parameter :: n_cycles=10
+      integer, parameter :: n_per_dim=250
+      integer, parameter :: n_cycles=1000
       type(vvec), target :: v
 c
       call init_mpi
