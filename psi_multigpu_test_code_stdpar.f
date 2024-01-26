@@ -1,26 +1,18 @@
 c#######################################################################
 c
-c ****** PSI_MULTIGPU_TEST_CODE
+c ****** PSI_MULTIGPU_TEST_CODE_STDPAR
 c
-c     This code mimics the basic MPI+OpenACC tasks of PSI's
+c     This code mimics the basic MPI+DC tasks of PSI's
 c     MAS Solar MHD code.
 c
 c     It sets up a Cartesian MPI topology, sets up a 3D grid
 c     and tests a "seam" (point to point) MPI communication
-c     using asyncronous Send and Recv calls, which use
-c     OpenACC's 'host_data' to use CUDA-aware MPI.
+c     using asyncronous Send and Recv calls.
 c     This is used both on a allocatable sub-array, as well as
 c     on a local buffer static array.
 c
 c     The code will automatically configure the topology based on
 c     the number of MPI ranks it is called with.
-c
-c     The code uses an MPI shared communicator to set the GPU device
-c     number using the 'set device' ACC pragma.
-c
-c     This code assumes you launch it with the number of MPI ranks per
-c     node = number of GPUs per node
-c     (e.g. for a dual socket node with 4 GPUs: mpiexec -npersocket 2)
 c
 c     If this code works on a multi-node GPU system,
 c     than (most likely) so will MAS!
@@ -32,7 +24,7 @@ c     www.predsci.com
 c     San Diego, California, USA 92121
 c
 c#######################################################################
-c Copyright 2022 Predictive Science Inc.
+c Copyright 2024 Predictive Science Inc.
 c
 c Licensed under the Apache License, Version 2.0 (the "License");
 c you may not use this file except in compliance with the License.
@@ -212,10 +204,6 @@ c
       end if
 c
       ntype_real=MPI_REAL8
-c
-c ****** Set GPU device number for current rank.
-c
-!$acc set device_num(iprocsh)
 c
       end subroutine
 c#######################################################################
@@ -666,7 +654,6 @@ c        is stride-1 in this case, no buffers are needed.
 c
 c ****** Launch async receives.
 c
-!$acc host_data use_device(v%r,v%t,v%p)
       call MPI_Irecv (v%r(:,:,  1),lbuf3r,ntype_real,iproc_pm,tagr,
      &                comm_all,req(1),ierr)
       call MPI_Irecv (v%r(:,:,n3r),lbuf3r,ntype_real,iproc_pp,tagr,
@@ -698,7 +685,6 @@ c
 c ****** Wait for all seams to complete.
 c
       call MPI_Waitall (12,req,MPI_STATUSES_IGNORE,ierr)
-!$acc end host_data
 c
 c ****** Seam the first dimension.
 c
@@ -712,39 +698,22 @@ c
      &            sbuf2t(n2t,n3t),rbuf2t(n2t,n3t),
      &            sbuf1p(n2p,n3p),rbuf1p(n2p,n3p),
      &            sbuf2p(n2p,n3p),rbuf2p(n2p,n3p))
-!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
-!$acc&                  rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 c
-!$acc parallel default(present)
-!$acc loop collapse(2)
-        do k=1,n3r
-          do j=1,n2r
-            sbuf1r(j,k)=v%r(n1r-1,j,k)
-            sbuf2r(j,k)=v%r(    2,j,k)
-          enddo
+        do concurrent (k=1:n3r,j=1:n2r)
+          sbuf1r(j,k)=v%r(n1r-1,j,k)
+          sbuf2r(j,k)=v%r(    2,j,k)
         enddo
 c
-!$acc loop collapse(2)
-        do k=1,n3t
-          do j=1,n2t
-            sbuf1t(j,k)=v%t(n1t-1,j,k)
-            sbuf2t(j,k)=v%t(    2,j,k)
-          enddo
+        do concurrent (k=1:n3t,j=1:n2t)
+          sbuf1t(j,k)=v%t(n1t-1,j,k)
+          sbuf2t(j,k)=v%t(    2,j,k)
         enddo
 c
-!$acc loop collapse(2)
-        do k=1,n3p
-          do j=1,n2p
-            sbuf1p(j,k)=v%p(n1p-1,j,k)
-            sbuf2p(j,k)=v%p(    2,j,k)
-          enddo
+        do concurrent (k=1:n3p,j=1:n2p)
+          sbuf1p(j,k)=v%p(n1p-1,j,k)
+          sbuf2p(j,k)=v%p(    2,j,k)
         enddo
-!$acc end parallel
 c
-!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t,
-!$acc&                     sbuf2t,sbuf1p,sbuf2p,
-!$acc&                     rbuf1r,rbuf2r,rbuf1t,
-!$acc&                     rbuf2t,rbuf1p,rbuf2p)
         call MPI_Irecv (rbuf1r,lbuf1r,ntype_real,iproc_rm,tagr,
      &                  comm_all,req(1),ierr)
         call MPI_Irecv (rbuf2r,lbuf1r,ntype_real,iproc_rp,tagr,
@@ -776,56 +745,33 @@ c
 c ****** Wait for all seams to complete.
 c
         call MPI_Waitall (12,req,MPI_STATUSES_IGNORE,ierr)
-!$acc end host_data
 c
 c ****** Unload buffers.
 c
-!$acc parallel default(present)
         if (iproc_rm.ne.MPI_PROC_NULL) then
-!$acc loop collapse(2)
-          do k=1,n3r
-            do j=1,n2r
-              v%r(1,j,k)=rbuf1r(j,k)
-            enddo
+          do concurrent (k=1:n3r,j=1:n2r)
+            v%r(1,j,k)=rbuf1r(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3t
-            do j=1,n2t
-              v%t(1,j,k)=rbuf1t(j,k)
-            enddo
+          do concurrent (k=1:n3t,j=1:n2t)
+            v%t(1,j,k)=rbuf1t(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3p
-            do j=1,n2p
-              v%p(1,j,k)=rbuf1p(j,k)
-            enddo
+          do concurrent (k=1:n3p,j=1:n2p)
+            v%p(1,j,k)=rbuf1p(j,k)
           enddo
         end if
 c
         if (iproc_rp.ne.MPI_PROC_NULL) then
-!$acc loop collapse(2)
-          do k=1,n3r
-            do j=1,n2r
-              v%r(n1r,j,k)=rbuf2r(j,k)
-            enddo
+          do concurrent (k=1:n3r,j=1:n2r)
+            v%r(n1r,j,k)=rbuf2r(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3t
-            do j=1,n2t
-              v%t(n1t,j,k)=rbuf2t(j,k)
-            enddo
+          do concurrent (k=1:n3t,j=1:n2t)
+            v%t(n1t,j,k)=rbuf2t(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3p
-            do j=1,n2p
-              v%p(n1p,j,k)=rbuf2p(j,k)
-            enddo
+          do concurrent (k=1:n3p,j=1:n2p)
+            v%p(n1p,j,k)=rbuf2p(j,k)
           enddo
         end if
-!$acc end parallel
 c
-!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
-!$acc&                 rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
         deallocate (sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
      &              rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 c
@@ -841,39 +787,22 @@ c
      &            sbuf2t(n1t,n3t),rbuf2t(n1t,n3t),
      &            sbuf1p(n1p,n3p),rbuf1p(n1p,n3p),
      &            sbuf2p(n1p,n3p),rbuf2p(n1p,n3p))
-!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
-!$acc&                  rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 c
-!$acc parallel default(present)
-!$acc loop collapse(2)
-        do k=1,n3r
-          do j=1,n1r
-            sbuf1r(j,k)=v%r(j,n2r-1,k)
-            sbuf2r(j,k)=v%r(j,    2,k)
-          enddo
+        do concurrent (k=1:n3r,j=1:n1r)
+          sbuf1r(j,k)=v%r(j,n2r-1,k)
+          sbuf2r(j,k)=v%r(j,    2,k)
         enddo
 c
-!$acc loop collapse(2)
-        do k=1,n3t
-          do j=1,n1t
-            sbuf1t(j,k)=v%t(j,n2t-1,k)
-            sbuf2t(j,k)=v%t(j,    2,k)
-          enddo
+        do concurrent (k=1:n3t,j=1:n1t)
+          sbuf1t(j,k)=v%t(j,n2t-1,k)
+          sbuf2t(j,k)=v%t(j,    2,k)
         enddo
 c
-!$acc loop collapse(2)
-        do k=1,n3p
-          do j=1,n1p
-            sbuf1p(j,k)=v%p(j,n2p-1,k)
-            sbuf2p(j,k)=v%p(j,    2,k)
-          enddo
+        do concurrent (k=1:n3p,j=1:n1p)
+          sbuf1p(j,k)=v%p(j,n2p-1,k)
+          sbuf2p(j,k)=v%p(j,    2,k)
         enddo
-!$acc end parallel
 c
-!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t,
-!$acc&                     sbuf2t,sbuf1p,sbuf2p,
-!$acc&                     rbuf1r,rbuf2r,rbuf1t,
-!$acc&                     rbuf2t,rbuf1p,rbuf2p)
         call MPI_Irecv (rbuf1r,lbuf2r,ntype_real,iproc_tm,tagr,
      &                  comm_all,req(1),ierr)
         call MPI_Irecv (rbuf2r,lbuf2r,ntype_real,iproc_tp,tagr,
@@ -905,56 +834,33 @@ c
 c ****** Wait for all seams to complete.
 c
         call MPI_Waitall (12,req,MPI_STATUSES_IGNORE,ierr)
-!$acc end host_data
 c
 c ****** Unload buffers.
 c
-!$acc parallel default(present)
         if (iproc_tm.ne.MPI_PROC_NULL) then
-!$acc loop collapse(2)
-          do k=1,n3r
-            do j=1,n1r
-              v%r(j,1,k)=rbuf1r(j,k)
-            enddo
+          do concurrent (k=1:n3r,j=1:n1r)
+            v%r(j,1,k)=rbuf1r(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3t
-            do j=1,n1t
-              v%t(j,1,k)=rbuf1t(j,k)
-            enddo
+          do concurrent (k=1:n3t,j=1:n1t)
+            v%t(j,1,k)=rbuf1t(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3p
-            do j=1,n1p
-              v%p(j,1,k)=rbuf1p(j,k)
-            enddo
+          do concurrent (k=1:n3p,j=1:n1p)
+            v%p(j,1,k)=rbuf1p(j,k)
           enddo
         end if
 c
         if (iproc_tp.ne.MPI_PROC_NULL) then
-!$acc loop collapse(2)
-          do k=1,n3r
-            do j=1,n1r
-              v%r(j,n2r,k)=rbuf2r(j,k)
-            enddo
+          do concurrent (k=1:n3r,j=1:n1r)
+            v%r(j,n2r,k)=rbuf2r(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3t
-            do j=1,n1t
-              v%t(j,n2t,k)=rbuf2t(j,k)
-            enddo
+          do concurrent (k=1:n3t,j=1:n1t)
+            v%t(j,n2t,k)=rbuf2t(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3p
-            do j=1,n1p
-              v%p(j,n2p,k)=rbuf2p(j,k)
-            enddo
+          do concurrent (k=1:n3p,j=1:n1p)
+            v%p(j,n2p,k)=rbuf2p(j,k)
           enddo
         end if
-!$acc end parallel
 c
-!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
-!$acc&                 rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
         deallocate (sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
      &              rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 c
@@ -962,7 +868,7 @@ c
 c
       end subroutine
 c#######################################################################
-      program psi_multigpu_test_code
+      program psi_multigpu_test_code_stdpar
 c
       use number_types
       use types
@@ -1025,34 +931,16 @@ c
       allocate(v%r(nr-1,nt,np))
       allocate(v%t(nr,nt-1,np))
       allocate(v%p(nr,nt,np-1))
-!$acc enter data create(v,v%r,v%t,v%p)
 c
-!$acc parallel default(present)
-!$acc loop collapse(3)
-      do k=1,np
-        do j=1,nt
-          do i=1,nr-1
-            v%r(i,j,k)=iproc
-          enddo
-        enddo
+      do concurrent (k=1:np,j=1:nt,i=1:nr-1)
+        v%r(i,j,k)=iproc
       enddo
-!$acc loop collapse(3)
-      do k=1,np
-        do j=1,nt-1
-          do i=1,nr
-            v%t(i,j,k)=iproc
-          enddo
-        enddo
+      do concurrent (k=1:np,j=1:nt-1,i=1:nr)
+        v%t(i,j,k)=iproc
       enddo
-!$acc loop collapse(3)
-      do k=1,np-1
-        do j=1,nt
-          do i=1,nr
-            v%p(i,j,k)=iproc
-          enddo
-        enddo
+      do concurrent (k=1:np-1,j=1:nt,i=1:nr)
+        v%p(i,j,k)=iproc
       enddo
-!$acc end parallel
 c
 c     Loop multiple times.
 c
@@ -1065,7 +953,6 @@ c
 c
       if (iamp0) then
         print*,"Run completed!"
-!$acc update self(v%r,v%t,v%p)
         print*, "vr(:,:,1):",    v%r(nr_2,nt_2,1)
         print*, "vr(:,:,2):",    v%r(nr_2,nt_2,2)
         print*, "vr(:,:,np-1):", v%r(nr_2,nt_2,np-1)
@@ -1093,7 +980,6 @@ c
         print*, "vp(:,nt,:):",   v%p(nr_2,nt,np_2)
       end if
 c
-!$acc exit data delete(v%r,v%t,v%p,v)
       deallocate(v%r,v%t,v%p)
 c
       call MPI_Finalize (ierr)
