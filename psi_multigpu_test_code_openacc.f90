@@ -1,13 +1,14 @@
 !#######################################################################
 !
-! ****** PSI_MULTIGPU_TEST_CODE_NODATA
+! ****** PSI_MULTIGPU_TEST_CODE_OPENACC
 !
 !     This code mimics the basic MPI+OpenACC tasks of PSI's
 !     MAS Solar MHD code.
 !
 !     It sets up a Cartesian MPI topology, sets up a 3D grid
 !     and tests a "seam" (point to point) MPI communication
-!     using asyncronous Send and Recv calls.
+!     using asyncronous Send and Recv calls, which use
+!     OpenACC's 'host_data' to use GPU-aware MPI.
 !     This is used both on a allocatable sub-array, as well as
 !     on a local buffer static array.
 !
@@ -664,6 +665,7 @@ subroutine seam_vvec (v)
 !
 ! ****** Launch async receives.
 !
+!$acc host_data use_device(v%r,v%t,v%p)
       call MPI_Irecv (v%r(:,:,  1),lbuf3r,ntype_real,iproc_pm,tagr, &
                       comm_all,req(1),ierr)
       call MPI_Irecv (v%r(:,:,n3r),lbuf3r,ntype_real,iproc_pp,tagr, &
@@ -695,6 +697,7 @@ subroutine seam_vvec (v)
 ! ****** Wait for all seams to complete.
 !
       call MPI_Waitall (12,req,MPI_STATUSES_IGNORE,ierr)
+!$acc end host_data
 !
 ! ****** Seam the first dimension.
 !
@@ -708,8 +711,10 @@ subroutine seam_vvec (v)
                   sbuf2t(n2t,n3t),rbuf2t(n2t,n3t), &
                   sbuf1p(n2p,n3p),rbuf1p(n2p,n3p), &
                   sbuf2p(n2p,n3p),rbuf2p(n2p,n3p))
+!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
+!$acc&                  rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 !
-!$acc parallel
+!$acc parallel default(present)
 !$acc loop collapse(2)
         do k=1,n3r
           do j=1,n2r
@@ -735,6 +740,10 @@ subroutine seam_vvec (v)
         enddo
 !$acc end parallel
 !
+!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t, &
+!$acc&                     sbuf2t,sbuf1p,sbuf2p, &
+!$acc&                     rbuf1r,rbuf2r,rbuf1t, &
+!$acc&                     rbuf2t,rbuf1p,rbuf2p)
         call MPI_Irecv (rbuf1r,lbuf1r,ntype_real,iproc_rm,tagr, &
                         comm_all,req(1),ierr)
         call MPI_Irecv (rbuf2r,lbuf1r,ntype_real,iproc_rp,tagr, &
@@ -766,10 +775,11 @@ subroutine seam_vvec (v)
 ! ****** Wait for all seams to complete.
 !
         call MPI_Waitall (12,req,MPI_STATUSES_IGNORE,ierr)
+!$acc end host_data
 !
 ! ****** Unload buffers.
 !
-!$acc parallel
+!$acc parallel default(present)
         if (iproc_rm.ne.MPI_PROC_NULL) then
 !$acc loop collapse(2)
           do k=1,n3r
@@ -813,6 +823,8 @@ subroutine seam_vvec (v)
         end if
 !$acc end parallel
 !
+!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
+!$acc&                 rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
         deallocate (sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
                     rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 !
@@ -828,8 +840,10 @@ subroutine seam_vvec (v)
                   sbuf2t(n1t,n3t),rbuf2t(n1t,n3t), &
                   sbuf1p(n1p,n3p),rbuf1p(n1p,n3p), &
                   sbuf2p(n1p,n3p),rbuf2p(n1p,n3p))
+!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
+!$acc&                  rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 !
-!$acc parallel
+!$acc parallel default(present)
 !$acc loop collapse(2)
         do k=1,n3r
           do j=1,n1r
@@ -855,6 +869,10 @@ subroutine seam_vvec (v)
         enddo
 !$acc end parallel
 !
+!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t, &
+!$acc&                     sbuf2t,sbuf1p,sbuf2p, &
+!$acc&                     rbuf1r,rbuf2r,rbuf1t, &
+!$acc&                     rbuf2t,rbuf1p,rbuf2p)
         call MPI_Irecv (rbuf1r,lbuf2r,ntype_real,iproc_tm,tagr, &
                         comm_all,req(1),ierr)
         call MPI_Irecv (rbuf2r,lbuf2r,ntype_real,iproc_tp,tagr, &
@@ -886,10 +904,11 @@ subroutine seam_vvec (v)
 ! ****** Wait for all seams to complete.
 !
         call MPI_Waitall (12,req,MPI_STATUSES_IGNORE,ierr)
+!$acc end host_data
 !
 ! ****** Unload buffers.
 !
-!$acc parallel
+!$acc parallel default(present)
         if (iproc_tm.ne.MPI_PROC_NULL) then
 !$acc loop collapse(2)
           do k=1,n3r
@@ -933,6 +952,8 @@ subroutine seam_vvec (v)
         end if
 !$acc end parallel
 !
+!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
+!$acc&                 rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
         deallocate (sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
                     rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 !
@@ -940,7 +961,7 @@ subroutine seam_vvec (v)
 !
 end subroutine
 !#######################################################################
-program psi_multigpu_test_code_nodata
+program psi_multigpu_test_code_openacc
 !
       use number_types
       use types
@@ -1003,8 +1024,9 @@ program psi_multigpu_test_code_nodata
       allocate(v%r(nr-1,nt,np))
       allocate(v%t(nr,nt-1,np))
       allocate(v%p(nr,nt,np-1))
+!$acc enter data create(v,v%r,v%t,v%p)
 !
-!$acc parallel
+!$acc parallel default(present)
 !$acc loop collapse(3)
       do k=1,np
         do j=1,nt
@@ -1042,6 +1064,7 @@ program psi_multigpu_test_code_nodata
 !
       if (iamp0) then
         print*,"Run completed!"
+!$acc update self(v%r,v%t,v%p)
         print*, "vr(:,:,1):",    v%r(nr_2,nt_2,1)
         print*, "vr(:,:,2):",    v%r(nr_2,nt_2,2)
         print*, "vr(:,:,np-1):", v%r(nr_2,nt_2,np-1)
@@ -1069,6 +1092,7 @@ program psi_multigpu_test_code_nodata
         print*, "vp(:,nt,:):",   v%p(nr_2,nt,np_2)
       end if
 !
+!$acc exit data delete(v%r,v%t,v%p,v)
       deallocate(v%r,v%t,v%p)
 !
       call MPI_Finalize (ierr)

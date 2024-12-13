@@ -1,14 +1,14 @@
 !#######################################################################
 !
-! ****** PSI_MULTIGPU_TEST_CODE
+! ****** PSI_MULTIGPU_TEST_CODE_STDPAR_ACCDATA
 !
-!     This code mimics the basic MPI+OpenACC tasks of PSI's
-!     MAS Solar MHD code.
+!     This code mimics the basic MPI+DC tasks of PSI's
+!     MAS Solar MHD code with OpenACC data movement.
 !
 !     It sets up a Cartesian MPI topology, sets up a 3D grid
 !     and tests a "seam" (point to point) MPI communication
 !     using asyncronous Send and Recv calls, which use
-!     OpenACC's 'host_data' to use CUDA-aware MPI.
+!     OpenACC's 'host_data' to use GPU-aware MPI.
 !     This is used both on a allocatable sub-array, as well as
 !     on a local buffer static array.
 !
@@ -711,38 +711,27 @@ subroutine seam_vvec (v)
                   sbuf2t(n2t,n3t),rbuf2t(n2t,n3t), &
                   sbuf1p(n2p,n3p),rbuf1p(n2p,n3p), &
                   sbuf2p(n2p,n3p),rbuf2p(n2p,n3p))
-!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
 !$acc&                  rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 !
-!$acc parallel default(present)
-!$acc loop collapse(2)
-        do k=1,n3r
-          do j=1,n2r
-            sbuf1r(j,k)=v%r(n1r-1,j,k)
-            sbuf2r(j,k)=v%r(    2,j,k)
-          enddo
+        do concurrent (k=1:n3r,j=1:n2r)
+          sbuf1r(j,k)=v%r(n1r-1,j,k)
+          sbuf2r(j,k)=v%r(    2,j,k)
         enddo
 !
-!$acc loop collapse(2)
-        do k=1,n3t
-          do j=1,n2t
-            sbuf1t(j,k)=v%t(n1t-1,j,k)
-            sbuf2t(j,k)=v%t(    2,j,k)
-          enddo
+        do concurrent (k=1:n3t,j=1:n2t)
+          sbuf1t(j,k)=v%t(n1t-1,j,k)
+          sbuf2t(j,k)=v%t(    2,j,k)
         enddo
 !
-!$acc loop collapse(2)
-        do k=1,n3p
-          do j=1,n2p
-            sbuf1p(j,k)=v%p(n1p-1,j,k)
-            sbuf2p(j,k)=v%p(    2,j,k)
-          enddo
+        do concurrent (k=1:n3p,j=1:n2p)
+          sbuf1p(j,k)=v%p(n1p-1,j,k)
+          sbuf2p(j,k)=v%p(    2,j,k)
         enddo
-!$acc end parallel
 !
-!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t,
-!$acc&                     sbuf2t,sbuf1p,sbuf2p,
-!$acc&                     rbuf1r,rbuf2r,rbuf1t,
+!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t, &
+!$acc&                     sbuf2t,sbuf1p,sbuf2p, &
+!$acc&                     rbuf1r,rbuf2r,rbuf1t, &
 !$acc&                     rbuf2t,rbuf1p,rbuf2p)
         call MPI_Irecv (rbuf1r,lbuf1r,ntype_real,iproc_rm,tagr, &
                         comm_all,req(1),ierr)
@@ -779,51 +768,31 @@ subroutine seam_vvec (v)
 !
 ! ****** Unload buffers.
 !
-!$acc parallel default(present)
         if (iproc_rm.ne.MPI_PROC_NULL) then
-!$acc loop collapse(2)
-          do k=1,n3r
-            do j=1,n2r
-              v%r(1,j,k)=rbuf1r(j,k)
-            enddo
+          do concurrent (k=1:n3r,j=1:n2r)
+            v%r(1,j,k)=rbuf1r(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3t
-            do j=1,n2t
-              v%t(1,j,k)=rbuf1t(j,k)
-            enddo
+          do concurrent (k=1:n3t,j=1:n2t)
+            v%t(1,j,k)=rbuf1t(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3p
-            do j=1,n2p
-              v%p(1,j,k)=rbuf1p(j,k)
-            enddo
+          do concurrent (k=1:n3p,j=1:n2p)
+            v%p(1,j,k)=rbuf1p(j,k)
           enddo
         end if
 !
         if (iproc_rp.ne.MPI_PROC_NULL) then
-!$acc loop collapse(2)
-          do k=1,n3r
-            do j=1,n2r
-              v%r(n1r,j,k)=rbuf2r(j,k)
-            enddo
+          do concurrent (k=1:n3r,j=1:n2r)
+            v%r(n1r,j,k)=rbuf2r(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3t
-            do j=1,n2t
-              v%t(n1t,j,k)=rbuf2t(j,k)
-            enddo
+          do concurrent (k=1:n3t,j=1:n2t)
+            v%t(n1t,j,k)=rbuf2t(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3p
-            do j=1,n2p
-              v%p(n1p,j,k)=rbuf2p(j,k)
-            enddo
+          do concurrent (k=1:n3p,j=1:n2p)
+            v%p(n1p,j,k)=rbuf2p(j,k)
           enddo
         end if
-!$acc end parallel
 !
-!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
 !$acc&                 rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
         deallocate (sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
                     rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
@@ -840,38 +809,27 @@ subroutine seam_vvec (v)
                   sbuf2t(n1t,n3t),rbuf2t(n1t,n3t), &
                   sbuf1p(n1p,n3p),rbuf1p(n1p,n3p), &
                   sbuf2p(n1p,n3p),rbuf2p(n1p,n3p))
-!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+!$acc enter data create(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
 !$acc&                  rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
 !
-!$acc parallel default(present)
-!$acc loop collapse(2)
-        do k=1,n3r
-          do j=1,n1r
-            sbuf1r(j,k)=v%r(j,n2r-1,k)
-            sbuf2r(j,k)=v%r(j,    2,k)
-          enddo
+        do concurrent (k=1:n3r,j=1:n1r)
+          sbuf1r(j,k)=v%r(j,n2r-1,k)
+          sbuf2r(j,k)=v%r(j,    2,k)
         enddo
 !
-!$acc loop collapse(2)
-        do k=1,n3t
-          do j=1,n1t
-            sbuf1t(j,k)=v%t(j,n2t-1,k)
-            sbuf2t(j,k)=v%t(j,    2,k)
-          enddo
+        do concurrent (k=1:n3t,j=1:n1t)
+          sbuf1t(j,k)=v%t(j,n2t-1,k)
+          sbuf2t(j,k)=v%t(j,    2,k)
         enddo
 !
-!$acc loop collapse(2)
-        do k=1,n3p
-          do j=1,n1p
-            sbuf1p(j,k)=v%p(j,n2p-1,k)
-            sbuf2p(j,k)=v%p(j,    2,k)
-          enddo
+        do concurrent (k=1:n3p,j=1:n1p)
+          sbuf1p(j,k)=v%p(j,n2p-1,k)
+          sbuf2p(j,k)=v%p(j,    2,k)
         enddo
-!$acc end parallel
 !
-!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t,
-!$acc&                     sbuf2t,sbuf1p,sbuf2p,
-!$acc&                     rbuf1r,rbuf2r,rbuf1t,
+!$acc host_data use_device(sbuf1r,sbuf2r,sbuf1t, &
+!$acc&                     sbuf2t,sbuf1p,sbuf2p, &
+!$acc&                     rbuf1r,rbuf2r,rbuf1t, &
 !$acc&                     rbuf2t,rbuf1p,rbuf2p)
         call MPI_Irecv (rbuf1r,lbuf2r,ntype_real,iproc_tm,tagr, &
                         comm_all,req(1),ierr)
@@ -908,51 +866,31 @@ subroutine seam_vvec (v)
 !
 ! ****** Unload buffers.
 !
-!$acc parallel default(present)
         if (iproc_tm.ne.MPI_PROC_NULL) then
-!$acc loop collapse(2)
-          do k=1,n3r
-            do j=1,n1r
-              v%r(j,1,k)=rbuf1r(j,k)
-            enddo
+          do concurrent (k=1:n3r,j=1:n1r)
+            v%r(j,1,k)=rbuf1r(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3t
-            do j=1,n1t
-              v%t(j,1,k)=rbuf1t(j,k)
-            enddo
+          do concurrent (k=1:n3t,j=1:n1t)
+            v%t(j,1,k)=rbuf1t(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3p
-            do j=1,n1p
-              v%p(j,1,k)=rbuf1p(j,k)
-            enddo
+          do concurrent (k=1:n3p,j=1:n1p)
+            v%p(j,1,k)=rbuf1p(j,k)
           enddo
         end if
 !
         if (iproc_tp.ne.MPI_PROC_NULL) then
-!$acc loop collapse(2)
-          do k=1,n3r
-            do j=1,n1r
-              v%r(j,n2r,k)=rbuf2r(j,k)
-            enddo
+          do concurrent (k=1:n3r,j=1:n1r)
+            v%r(j,n2r,k)=rbuf2r(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3t
-            do j=1,n1t
-              v%t(j,n2t,k)=rbuf2t(j,k)
-            enddo
+          do concurrent (k=1:n3t,j=1:n1t)
+            v%t(j,n2t,k)=rbuf2t(j,k)
           enddo
-!$acc loop collapse(2)
-          do k=1,n3p
-            do j=1,n1p
-              v%p(j,n2p,k)=rbuf2p(j,k)
-            enddo
+          do concurrent (k=1:n3p,j=1:n1p)
+            v%p(j,n2p,k)=rbuf2p(j,k)
           enddo
         end if
-!$acc end parallel
 !
-!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p,
+!$acc exit data delete(sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
 !$acc&                 rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
         deallocate (sbuf1r,sbuf2r,sbuf1t,sbuf2t,sbuf1p,sbuf2p, &
                     rbuf1r,rbuf2r,rbuf1t,rbuf2t,rbuf1p,rbuf2p)
@@ -961,7 +899,7 @@ subroutine seam_vvec (v)
 !
 end subroutine
 !#######################################################################
-program psi_multigpu_test_code
+program psi_multigpu_test_code_stdpar
 !
       use number_types
       use types
@@ -1026,32 +964,15 @@ program psi_multigpu_test_code
       allocate(v%p(nr,nt,np-1))
 !$acc enter data create(v,v%r,v%t,v%p)
 !
-!$acc parallel default(present)
-!$acc loop collapse(3)
-      do k=1,np
-        do j=1,nt
-          do i=1,nr-1
-            v%r(i,j,k)=iproc
-          enddo
-        enddo
+      do concurrent (k=1:np,j=1:nt,i=1:nr-1)
+        v%r(i,j,k)=iproc
       enddo
-!$acc loop collapse(3)
-      do k=1,np
-        do j=1,nt-1
-          do i=1,nr
-            v%t(i,j,k)=iproc
-          enddo
-        enddo
+      do concurrent (k=1:np,j=1:nt-1,i=1:nr)
+        v%t(i,j,k)=iproc
       enddo
-!$acc loop collapse(3)
-      do k=1,np-1
-        do j=1,nt
-          do i=1,nr
-            v%p(i,j,k)=iproc
-          enddo
-        enddo
+      do concurrent (k=1:np-1,j=1:nt,i=1:nr)
+        v%p(i,j,k)=iproc
       enddo
-!$acc end parallel
 !
 !     Loop multiple times.
 !
