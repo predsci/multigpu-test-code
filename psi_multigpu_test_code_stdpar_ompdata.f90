@@ -8,7 +8,7 @@
 !     It sets up a Cartesian MPI topology, sets up a 3D grid
 !     and tests a "seam" (point to point) MPI communication
 !     using asyncronous Send and Recv calls, which use
-!     OpenMP's 'use_device_ptr' to use GPU-aware MPI.
+!     OpenMP's 'use_device_addr' to use GPU-aware MPI.
 !     This is used both on a allocatable sub-array, as well as
 !     on a local buffer static array.
 !
@@ -666,7 +666,7 @@ subroutine seam_vvec (v)
 !
 ! ****** Launch async receives.
 !
-!$omp target data use_device_ptr(v%r,v%t,v%p)
+!$omp target data use_device_addr(v%r,v%t,v%p)
       call MPI_Irecv (v%r(:,:,  1),lbuf3r,ntype_real,iproc_pm,tagr, &
                       comm_all,req(1),ierr)
       call MPI_Irecv (v%r(:,:,n3r),lbuf3r,ntype_real,iproc_pp,tagr, &
@@ -730,7 +730,7 @@ subroutine seam_vvec (v)
           sbuf2p(j,k)=v%p(    2,j,k)
         enddo
 !
-!$omp target data use_device_ptr(sbuf1r,sbuf2r,sbuf1t, &
+!$omp target data use_device_addr(sbuf1r,sbuf2r,sbuf1t, &
 !$omp                            sbuf2t,sbuf1p,sbuf2p, &
 !$omp                            rbuf1r,rbuf2r,rbuf1t, &
 !$omp                            rbuf2t,rbuf1p,rbuf2p)
@@ -828,7 +828,7 @@ subroutine seam_vvec (v)
           sbuf2p(j,k)=v%p(j,    2,k)
         enddo
 !
-!$omp target data use_device_ptr(sbuf1r,sbuf2r,sbuf1t, &
+!$omp target data use_device_addr(sbuf1r,sbuf2r,sbuf1t, &
 !$omp                            sbuf2t,sbuf1p,sbuf2p, &
 !$omp                            rbuf1r,rbuf2r,rbuf1t, &
 !$omp                            rbuf2t,rbuf1p,rbuf2p)
