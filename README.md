@@ -31,12 +31,19 @@ Example compile lines using the NVIDIA HPC SDK 24.11 on GPUs:
 `mpif90 psi_multigpu_test_code_openacc.f90        -acc=gpu -gpu=ccnative,mem:separate -Minfo=accel -o psi_multigpu_test_code_openacc`  
   
 `mpif90 psi_multigpu_test_code_openacc_nodata.f90 -acc=gpu -gpu=ccnative,mem:unified  -Minfo=accel -o psi_multigpu_test_code_openacc_nodata`  
-    
   
+Example compile lines using the Intel OneAPI HPC SDK 2025.2 on GPUs:
+  
+`mpiifx -O3 -fp-model precise -heap-arrays -fopenmp-target-do-concurrent -fiopenmp -fopenmp-targets=spir64 -fopenmp-do-concurrent-maptype-modifier=present psi_multigpu_test_code_stdpar_ompdata.f90 -o psi_multigpu_test_code_stdpar_ompdata`  
+    
 Example launch commands:  
   
 `mpiexec -npernode 4 ./psi_multigpu_test_code_openacc`  
 `mpiexec -npernode 4 ./launch_multigpu_openmpi.sh psi_multigpu_test_code_stdpar`  
+  
+For Intel GPUs, first set:  
+`export I_MPI_OFFLOAD=2`  
+
   
 
 

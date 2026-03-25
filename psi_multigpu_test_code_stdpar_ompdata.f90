@@ -63,9 +63,9 @@ module types
       use number_types
 !
       type :: vvec
-        real(r_typ), dimension(:,:,:), allocatable :: r !(nrm,nt,np)
-        real(r_typ), dimension(:,:,:), allocatable :: t !(nr,ntm,np)
-        real(r_typ), dimension(:,:,:), allocatable :: p !(nr,nt,npm)
+        real(r_typ), dimension(:,:,:), pointer, contiguous :: r !(nrm,nt,np)
+        real(r_typ), dimension(:,:,:), pointer, contiguous :: t !(nr,ntm,np)
+        real(r_typ), dimension(:,:,:), pointer, contiguous :: p !(nr,nt,npm)
       end type
 !
 end module
@@ -625,6 +625,7 @@ subroutine seam_vvec (v)
       real(r_typ),dimension(:,:),allocatable :: sbuf2t,rbuf2t
       real(r_typ),dimension(:,:),allocatable :: sbuf1p,rbuf1p
       real(r_typ),dimension(:,:),allocatable :: sbuf2p,rbuf2p
+      real(r_typ),dimension(:,:,:), pointer, contiguous :: vr,vt,vp
 !
 !-----------------------------------------------------------------------
 !
@@ -661,38 +662,44 @@ subroutine seam_vvec (v)
       lbuf1r=n2r*n3r;    lbuf1t=n2t*n3t;    lbuf1p=n2p*n3p
       lbuf2r=n1r*n3r;    lbuf2t=n1t*n3t;    lbuf2p=n1p*n3p
 !
+! ****** Set pointers since OpenMP can't handle derived types in 
+!        use_device_addr:
+      vr=>v%r
+      vt=>v%t
+      vp=>v%p
+!
 ! ****** Seam the third (periodic) dimension. Since seam data
 !        is stride-1 in this case, no buffers are needed.
 !
 ! ****** Launch async receives.
 !
-!$omp target data use_device_addr(v%r,v%t,v%p)
-      call MPI_Irecv (v%r(:,:,  1),lbuf3r,ntype_real,iproc_pm,tagr, &
+!$omp target data use_device_addr(vr,vt,vp)
+      call MPI_Irecv (vr(:,:,  1),lbuf3r,ntype_real,iproc_pm,tagr, &
                       comm_all,req(1),ierr)
-      call MPI_Irecv (v%r(:,:,n3r),lbuf3r,ntype_real,iproc_pp,tagr, &
+      call MPI_Irecv (vr(:,:,n3r),lbuf3r,ntype_real,iproc_pp,tagr, &
                       comm_all,req(2),ierr)
-      call MPI_Irecv (v%t(:,:,  1),lbuf3t,ntype_real,iproc_pm,tagt, &
+      call MPI_Irecv (vt(:,:,  1),lbuf3t,ntype_real,iproc_pm,tagt, &
                       comm_all,req(3),ierr)
-      call MPI_Irecv (v%t(:,:,n3t),lbuf3t,ntype_real,iproc_pp,tagt, &
+      call MPI_Irecv (vt(:,:,n3t),lbuf3t,ntype_real,iproc_pp,tagt, &
                       comm_all,req(4),ierr)
-      call MPI_Irecv (v%p(:,:,  1),lbuf3p,ntype_real,iproc_pm,tagp, &
+      call MPI_Irecv (vp(:,:,  1),lbuf3p,ntype_real,iproc_pm,tagp, &
                       comm_all,req(5),ierr)
-      call MPI_Irecv (v%p(:,:,n3p),lbuf3p,ntype_real,iproc_pp,tagp, &
+      call MPI_Irecv (vp(:,:,n3p),lbuf3p,ntype_real,iproc_pp,tagp, &
                       comm_all,req(6),ierr)
 !
 ! ****** Launch async sends.
 !
-      call MPI_Isend (v%r(:,:,n3r-1),lbuf3r,ntype_real,iproc_pp,tagr, &
+      call MPI_Isend (vr(:,:,n3r-1),lbuf3r,ntype_real,iproc_pp,tagr, &
                       comm_all,req(7),ierr)
-      call MPI_Isend (v%r(:,:,    2),lbuf3r,ntype_real,iproc_pm,tagr, &
+      call MPI_Isend (vr(:,:,    2),lbuf3r,ntype_real,iproc_pm,tagr, &
                       comm_all,req(8),ierr)
-      call MPI_Isend (v%t(:,:,n3t-1),lbuf3t,ntype_real,iproc_pp,tagt, &
+      call MPI_Isend (vt(:,:,n3t-1),lbuf3t,ntype_real,iproc_pp,tagt, &
                       comm_all,req(9),ierr)
-      call MPI_Isend (v%t(:,:,    2),lbuf3t,ntype_real,iproc_pm,tagt, &
+      call MPI_Isend (vt(:,:,    2),lbuf3t,ntype_real,iproc_pm,tagt, &
                       comm_all,req(10),ierr)
-      call MPI_Isend (v%p(:,:,n3p-1),lbuf3p,ntype_real,iproc_pp,tagp, &
+      call MPI_Isend (vp(:,:,n3p-1),lbuf3p,ntype_real,iproc_pp,tagp, &
                       comm_all,req(11),ierr)
-      call MPI_Isend (v%p(:,:,    2),lbuf3p,ntype_real,iproc_pm,tagp, &
+      call MPI_Isend (vp(:,:,    2),lbuf3p,ntype_real,iproc_pm,tagp, &
                       comm_all,req(12),ierr)
 !
 ! ****** Wait for all seams to complete.
